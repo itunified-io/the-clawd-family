@@ -60,12 +60,12 @@ HTTP 404
 
 ---
 
-### 3. Agile API Sprint Creation Not Supported
+### 3. Agile API Sprint Creation — Use Global Endpoint
 
-**Issue:** POST to create sprints returns HTTP 405 (Method Not Allowed)
+**Issue:** POST to board-scoped endpoint returns HTTP 405 (Method Not Allowed)
 
-**Affected Endpoint:**
-- `POST /rest/agile/1.0/board/{boardId}/sprint`
+**Endpoint that FAILS (board-scoped):**
+- `POST /rest/agile/1.0/board/{boardId}/sprint` → HTTP 405
 
 **Error Response:**
 ```json
@@ -78,11 +78,32 @@ HTTP 404
 }
 ```
 
-**Impact:** Sprints must be created via Jira Web UI, cannot be automated via API
+**SOLUTION — Use the global endpoint instead:**
+- `POST /rest/agile/1.0/sprint` ✅ (with `originBoardId` in request body)
 
-**Workaround:** Manual Web UI creation or via Confluence page setup
+**Working Request:**
+```json
+POST /rest/agile/1.0/sprint
+{
+  "name": "Sprint 1",
+  "originBoardId": 705,
+  "startDate": "2026-02-17T00:00:00.000+01:00",
+  "endDate": "2026-02-28T23:59:59.000+01:00",
+  "goal": "Sprint goal text"
+}
+```
 
-**Note:** Other Agile API endpoints (GET sprint details, move issues to sprint) work correctly
+**Key Insight:** The board-scoped URL (`/board/{id}/sprint`) only supports GET (listing).
+Sprint creation uses the **global** `/rest/agile/1.0/sprint` endpoint with the board specified
+in the request body via `originBoardId`.
+
+**Moving issues to sprints also works:**
+- `POST /rest/agile/1.0/sprint/{sprintId}/issue` ✅
+- Body: `{"issues": ["JCF-2", "JCF-3"]}`
+
+**Testing:**
+- ✅ Sprints 420-423 created on JCF board (board ID 705) via global endpoint
+- ✅ 14 stories assigned to 4 sprints via sprint issue endpoint
 
 ---
 
@@ -173,11 +194,16 @@ Authorization: Basic {credentials}
 
 ### 3. Alternative Approaches for Unsupported Operations
 
-| Unsupported Operation | Alternative |
+| Operation | Correct Endpoint |
 |---|---|
-| Create sprints via API | Web UI or Confluence-based automation |
-| Bulk search/update | Iterate with local issue keys |
-| Agile API sprint creation | Manual Web UI setup |
+| Create sprints | `POST /rest/agile/1.0/sprint` (global, with `originBoardId` in body) |
+| Create versions | `POST /rest/api/2/version` (global, with `projectId` in body) |
+| Move issues to sprint | `POST /rest/agile/1.0/sprint/{sprintId}/issue` |
+| Bulk search/update | Iterate with local issue keys (search may return 0 results) |
+
+**Pattern:** Creation endpoints are **global** (not resource-scoped). The resource
+(board/project) is specified in the **request body**, not the URL path.
+URL-scoped variants (`/board/{id}/sprint`, `/project/{id}/version`) only support GET.
 
 ### 4. Rate Limiting Observations
 
@@ -209,12 +235,12 @@ Using REST API v2, successfully completed:
 
 ---
 
-### 6. Version Creation via API Not Supported (HTTP 405)
+### 6. Version Creation — Use Global Endpoint
 
-**Issue:** POST to create versions returns HTTP 405 (Method Not Allowed)
+**Issue:** POST to project-scoped endpoint returns HTTP 405 (Method Not Allowed)
 
-**Affected Endpoint:**
-- `POST /rest/api/2/project/{projectId}/version`
+**Endpoint that FAILS (project-scoped):**
+- `POST /rest/api/2/project/{projectId}/version` → HTTP 405
 
 **Error Response:**
 ```json
@@ -227,20 +253,39 @@ Using REST API v2, successfully completed:
 }
 ```
 
-**Tested With:** Project ID 10631 (CCNTNT), both hardcoded IDs and dynamic lookup
+**SOLUTION — Use the global endpoint instead:**
+- `POST /rest/api/2/version` ✅ (with `projectId` in request body)
 
-**Impact:** Versions must be created via Jira Web UI, cannot be automated via API
+**Working Request:**
+```json
+POST /rest/api/2/version
+{
+  "name": "v2.0.0",
+  "description": "Product Launch",
+  "projectId": 10730,
+  "releaseDate": "2026-02-28",
+  "released": false,
+  "archived": false
+}
+```
 
-**Workaround:** Manual Web UI creation via Project Settings → Releases/Versions
+**Key Insight:** The project-scoped URL (`/project/{id}/version`) only supports GET (listing).
+Version creation uses the **global** `/rest/api/2/version` endpoint with the project specified
+in the request body via `projectId`.
 
-**Note:** GET endpoint for versions works correctly; only POST is unsupported
+**Assigning Fix Versions to issues also works:**
+- `PUT /rest/api/2/issue/{key}` with `{"fields":{"fixVersions":[{"id":"10206"}]}}` ✅
+
+**Testing:**
+- ✅ Versions v2.0.0-v2.3.0 created on JCF project (project ID 10730)
+- ✅ 14 stories assigned to fix versions via issue update endpoint
 
 ---
 
 ## Future Improvements
 
-- [x] Test version creation via API - CONFIRMED NOT SUPPORTED
-- [x] Test sprint creation via API - CONFIRMED NOT SUPPORTED
+- [x] Test version creation via API - ✅ WORKS via global endpoint `POST /rest/api/2/version`
+- [x] Test sprint creation via API - ✅ WORKS via global endpoint `POST /rest/agile/1.0/sprint`
 - [ ] Investigate permission model for search endpoint
 - [ ] Document Agile API capabilities (what works vs what doesn't)
 - [ ] Create wrapper scripts that automate workarounds
