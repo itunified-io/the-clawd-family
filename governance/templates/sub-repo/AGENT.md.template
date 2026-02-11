@@ -1,0 +1,62 @@
+# AGENT.md – Sub-repo Governance
+
+**Governed by:** The Clawd Family
+**Governance Version:** (auto-detected from RAG)
+
+---
+
+## Governance RAG Access
+
+All governance policies (roles, gates, memory, conflict rules) are served via
+The Clawd Family RAG API. This file does NOT contain governance rules inline.
+
+### Connection
+
+```
+API Base URL: http://localhost:3000/api/governance
+```
+
+### Session Start
+
+At session start, query governance for your role-specific policies:
+
+```
+POST /api/governance/search
+{
+  "query": "What are my mandatory workflow steps?",
+  "role": "<AGENT_ROLE>",
+  "repo": "<REPO_NAME>"
+}
+```
+
+Cache the response for the session duration.
+
+### When RAG is Unavailable
+
+**STOP — ASK HUMAN. No file fallback, no guessing.**
+
+RAG is part of the Docker Compose stack (always-on). Unavailability indicates
+an infrastructure issue that requires human intervention.
+
+---
+
+## Jira Integration
+
+- **Jira Project Key:** {{JIRA_PROJECT_KEY}}
+- **Jira Project URL:** https://itunified.atlassian.net/browse/{{JIRA_PROJECT_KEY}}
+
+---
+
+## Repo-Specific Rules
+
+> Add repo-specific additive rules below. These extend (never override) master governance.
+
+---
+
+## Component Registry (this repo)
+
+> Register components for this repo below.
+
+| Component | Code Paths | Owner Role(s) | Jira Label |
+|-----------|------------|---------------|------------|
+| `{{PREFIX}}-example` | `src/` | BACKEND | `comp:{{PREFIX}}-example` |

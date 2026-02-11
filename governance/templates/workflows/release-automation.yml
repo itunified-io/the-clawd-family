@@ -1,0 +1,414 @@
+# =============================================================================
+# Jira-Driven GitHub Release Automation + Changelog (Mandatory Workflow)
+# =============================================================================
+# Automated GitHub release creation from Jira version completion.
+#
+# Three triggers:
+#   1. Scheduled (daily at midnight UTC) - polls Jira for completed versions
+#   2. Repository dispatch - webhook from Jira Automation on "Version released"
+#   3. Manual workflow_dispatch with optional version input
+#
+# Flow:
+#   Jira stories resolved → version complete
+#   → CHANGELOG.md updated + committed
+#   → GitHub tag + release created
+#   → Jira version marked as "Released"
+#
+# Setup:
+#   1. Copy this file to <repo>/.github/workflows/release-automation.yml
+#   2. Replace <PROJECT_KEY> with your Jira project key (e.g. CCNT, PLAT)
+#   3. Create the following GitHub repository secrets:
+#      - JIRA_DOMAIN    (e.g. itunified.atlassian.net)
+#      - JIRA_EMAIL     (service account email)
+#      - JIRA_API_TOKEN (Jira API token for the service account)
+#   4. GITHUB_TOKEN is provided automatically by GitHub Actions
+# =============================================================================
+
+name: Jira-Driven Release Automation
+
+on:
+  # Manual trigger for testing or on-demand release
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Specific version to release (e.g. v0.1.0-alpha). Leave empty for auto-detection.'
+        required: false
+        type: string
+
+  # Daily check for completed versions
+  schedule:
+    - cron: '0 0 * * *'  # Midnight UTC
+
+  # Webhook from Jira Automation when version is manually released
+  repository_dispatch:
+    types: [jira-version-released]
+
+env:
+  JIRA_DOMAIN: ${{ secrets.JIRA_DOMAIN }}
+  JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+  JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+  # TODO: Replace <PROJECT_KEY> with your Jira project key
+  JIRA_PROJECT_KEY: <PROJECT_KEY>
+
+jobs:
+  detect-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout repository with full history (needed for tagging)
+      # -----------------------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 2. Determine which version to release
+      # -----------------------------------------------------------------------
+      - name: Determine version to release
+        id: version
+        run: |
+          set -euo pipefail
+
+          # --- Priority 1: Manual input ---
+          if [ -n "${{ github.event.inputs.version || '' }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "source=manual" >> "$GITHUB_OUTPUT"
+            echo "::notice::Manual release requested for ${{ github.event.inputs.version }}"
+            exit 0
+          fi
+
+          # --- Priority 2: Jira webhook payload ---
+          WEBHOOK_VERSION="${{ github.event.client_payload.version || '' }}"
+          if [ -n "$WEBHOOK_VERSION" ]; then
+            echo "version=$WEBHOOK_VERSION" >> "$GITHUB_OUTPUT"
+            echo "source=jira-webhook" >> "$GITHUB_OUTPUT"
+            echo "::notice::Jira webhook triggered for version $WEBHOOK_VERSION"
+            exit 0
+          fi
+
+          # --- Priority 3: Auto-detect completed versions ---
+          echo "::group::Checking Jira versions for completion"
+
+          VERSIONS_JSON=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/project/${JIRA_PROJECT_KEY}/versions")
+
+          # Get unreleased versions sorted by releaseDate (earliest first)
+          UNRELEASED=$(echo "$VERSIONS_JSON" | jq -r '
+            [.[] | select(.released == false and .archived == false)]
+            | sort_by(.releaseDate // "9999")
+            | .[].name')
+
+          if [ -z "$UNRELEASED" ]; then
+            echo "::notice::No unreleased versions found."
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          for VERSION in $UNRELEASED; do
+            echo "Checking version: $VERSION"
+
+            JQL="project=${JIRA_PROJECT_KEY} AND fixVersion='${VERSION}'"
+            SEARCH_RESULT=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+              -G --data-urlencode "jql=${JQL}" \
+              --data-urlencode "fields=resolution" \
+              --data-urlencode "maxResults=200" \
+              "https://${JIRA_DOMAIN}/rest/api/3/search/jql")
+
+            TOTAL=$(echo "$SEARCH_RESULT" | jq '.issues | length')
+            RESOLVED=$(echo "$SEARCH_RESULT" | jq '[.issues[] | select(.fields.resolution != null)] | length')
+
+            echo "  → $RESOLVED / $TOTAL issues resolved"
+
+            if [ "$TOTAL" -gt 0 ] && [ "$TOTAL" -eq "$RESOLVED" ]; then
+              # Check if GitHub release already exists for this version
+              if git tag -l "$VERSION" | grep -q "$VERSION"; then
+                echo "  → Tag $VERSION already exists, skipping."
+                continue
+              fi
+
+              echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+              echo "source=auto-detected" >> "$GITHUB_OUTPUT"
+              echo "::notice::Version $VERSION is complete ($RESOLVED/$TOTAL resolved)!"
+              echo "::endgroup::"
+              exit 0
+            fi
+          done
+
+          echo "::notice::No completed versions ready for release."
+          echo "version=" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # 3. Skip remaining steps if no version to release
+      # -----------------------------------------------------------------------
+      - name: Check if release needed
+        if: steps.version.outputs.version == ''
+        run: |
+          echo "::notice::No version to release. Exiting."
+          exit 0
+
+      # -----------------------------------------------------------------------
+      # 4. Generate release notes from Jira issues
+      # -----------------------------------------------------------------------
+      - name: Generate release notes from Jira
+        if: steps.version.outputs.version != ''
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          JQL="project=${JIRA_PROJECT_KEY} AND fixVersion='${VERSION}' ORDER BY issuetype DESC, priority ASC, key ASC"
+
+          RESPONSE=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            -G --data-urlencode "jql=${JQL}" \
+            --data-urlencode "fields=summary,issuetype,priority" \
+            --data-urlencode "maxResults=200" \
+            "https://${JIRA_DOMAIN}/rest/api/3/search/jql")
+
+          TOTAL=$(echo "$RESPONSE" | jq '.issues | length')
+
+          # Group issues by type
+          EPICS=$(echo "$RESPONSE" | jq -r '
+            [.issues[] | select(.fields.issuetype.name == "Epic")]
+            | if length > 0 then
+                map("- [\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)): \(.fields.summary)")
+                | join("\n")
+              else empty end')
+
+          STORIES=$(echo "$RESPONSE" | jq -r '
+            [.issues[] | select(.fields.issuetype.name == "Story")]
+            | if length > 0 then
+                map("- [\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)): \(.fields.summary)")
+                | join("\n")
+              else empty end')
+
+          TASKS=$(echo "$RESPONSE" | jq -r '
+            [.issues[] | select(.fields.issuetype.name == "Task")]
+            | if length > 0 then
+                map("- [\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)): \(.fields.summary)")
+                | join("\n")
+              else empty end')
+
+          BUGS=$(echo "$RESPONSE" | jq -r '
+            [.issues[] | select(.fields.issuetype.name == "Bug")]
+            | if length > 0 then
+                map("- [\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)): \(.fields.summary)")
+                | join("\n")
+              else empty end')
+
+          # Build release notes
+          {
+            echo "## Release ${VERSION}"
+            echo ""
+            echo "**${TOTAL} issues resolved** | [View in Jira](https://${JIRA_DOMAIN}/projects/${JIRA_PROJECT_KEY}/versions)"
+            echo ""
+
+            if [ -n "$EPICS" ]; then
+              echo "### Epics"
+              echo "$EPICS"
+              echo ""
+            fi
+
+            if [ -n "$STORIES" ]; then
+              echo "### Stories"
+              echo "$STORIES"
+              echo ""
+            fi
+
+            if [ -n "$TASKS" ]; then
+              echo "### Tasks"
+              echo "$TASKS"
+              echo ""
+            fi
+
+            if [ -n "$BUGS" ]; then
+              echo "### Bug Fixes"
+              echo "$BUGS"
+              echo ""
+            fi
+
+            echo "---"
+            echo "*Release triggered by: ${{ steps.version.outputs.source }}*"
+          } > release-notes.md
+
+          echo "::group::Release Notes"
+          cat release-notes.md
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # 5. Update CHANGELOG.md
+      # -----------------------------------------------------------------------
+      - name: Update CHANGELOG.md
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          DATE=$(date +%Y-%m-%d)
+
+          # Build changelog entry from Jira data
+          JQL="project=${JIRA_PROJECT_KEY} AND fixVersion='${VERSION}' ORDER BY issuetype DESC, key ASC"
+
+          RESPONSE=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            -G --data-urlencode "jql=${JQL}" \
+            --data-urlencode "fields=summary,issuetype" \
+            --data-urlencode "maxResults=200" \
+            "https://${JIRA_DOMAIN}/rest/api/3/search/jql")
+
+          # Build categorized changelog entry
+          ENTRY_FILE=$(mktemp)
+          {
+            echo "## [${VERSION}] - ${DATE}"
+            echo ""
+
+            # Features (Stories)
+            STORIES=$(echo "$RESPONSE" | jq -r '
+              [.issues[] | select(.fields.issuetype.name == "Story")]
+              | if length > 0 then
+                  map("- \(.fields.summary) ([\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)))")
+                  | join("\n")
+                else empty end')
+            if [ -n "$STORIES" ]; then
+              echo "### Added"
+              echo "$STORIES"
+              echo ""
+            fi
+
+            # Tasks
+            TASKS=$(echo "$RESPONSE" | jq -r '
+              [.issues[] | select(.fields.issuetype.name == "Task")]
+              | if length > 0 then
+                  map("- \(.fields.summary) ([\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)))")
+                  | join("\n")
+                else empty end')
+            if [ -n "$TASKS" ]; then
+              echo "### Changed"
+              echo "$TASKS"
+              echo ""
+            fi
+
+            # Bug fixes
+            BUGS=$(echo "$RESPONSE" | jq -r '
+              [.issues[] | select(.fields.issuetype.name == "Bug")]
+              | if length > 0 then
+                  map("- \(.fields.summary) ([\(.key)](https://'"${JIRA_DOMAIN}"'/browse/\(.key)))")
+                  | join("\n")
+                else empty end')
+            if [ -n "$BUGS" ]; then
+              echo "### Fixed"
+              echo "$BUGS"
+              echo ""
+            fi
+          } > "$ENTRY_FILE"
+
+          echo "::group::Changelog Entry"
+          cat "$ENTRY_FILE"
+          echo "::endgroup::"
+
+          # Insert after the RELEASE_MARKER line in CHANGELOG.md
+          if [ -f CHANGELOG.md ]; then
+            sed -i "/<!-- RELEASE_MARKER/r $ENTRY_FILE" CHANGELOG.md
+          else
+            # Create CHANGELOG.md if it doesn't exist
+            {
+              echo "# Changelog"
+              echo ""
+              echo "<!-- RELEASE_MARKER -->"
+              cat "$ENTRY_FILE"
+            } > CHANGELOG.md
+          fi
+
+          rm -f "$ENTRY_FILE"
+
+      # -----------------------------------------------------------------------
+      # 6. Commit CHANGELOG.md and create Git tag
+      # -----------------------------------------------------------------------
+      - name: Commit changelog and create tag
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Commit changelog update
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "::notice::No changelog changes to commit."
+          else
+            git commit -m "docs: update CHANGELOG.md for ${VERSION} [skip ci]"
+            git push origin HEAD
+          fi
+
+          # Create annotated tag on the changelog commit
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
+
+      # -----------------------------------------------------------------------
+      # 7. Create GitHub Release
+      # -----------------------------------------------------------------------
+      - name: Create GitHub Release
+        if: steps.version.outputs.version != ''
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          bodyFile: release-notes.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'alpha') || contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'rc') }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 8. Mark Jira version as released (only for auto-detected versions)
+      # -----------------------------------------------------------------------
+      - name: Mark Jira version as released
+        if: steps.version.outputs.version != '' && steps.version.outputs.source != 'jira-webhook'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Get version ID from Jira
+          VERSION_ID=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/project/${JIRA_PROJECT_KEY}/versions" | \
+            jq -r ".[] | select(.name == \"$VERSION\") | .id")
+
+          if [ -z "$VERSION_ID" ] || [ "$VERSION_ID" = "null" ]; then
+            echo "::warning::Could not find Jira version ID for $VERSION"
+            exit 0
+          fi
+
+          echo "Marking Jira version $VERSION (ID: $VERSION_ID) as released..."
+
+          curl -sf -X PUT -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://${JIRA_DOMAIN}/rest/api/3/version/${VERSION_ID}" \
+            -d "{\"released\": true, \"releaseDate\": \"$(date +%Y-%m-%d)\"}"
+
+          echo "::notice::Jira version $VERSION marked as released."
+
+      # -----------------------------------------------------------------------
+      # 9. Summary
+      # -----------------------------------------------------------------------
+      - name: Summary
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SOURCE: ${{ steps.version.outputs.source }}
+        run: |
+          echo "## Release Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Property | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Version** | \`$VERSION\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Trigger** | $SOURCE |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Pre-release** | $(echo $VERSION | grep -qE '(alpha|beta|rc)' && echo 'Yes' || echo 'No') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **GitHub Release** | [View](https://github.com/${{ github.repository }}/releases/tag/$VERSION) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Jira Version** | [View](https://${JIRA_DOMAIN}/projects/${JIRA_PROJECT_KEY}/versions) |" >> "$GITHUB_STEP_SUMMARY"

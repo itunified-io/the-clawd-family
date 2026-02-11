@@ -1,0 +1,179 @@
+# =============================================================================
+# Jira Issue Status Sync (Mandatory Workflow)
+# =============================================================================
+# Automatically transitions Jira issues based on GitHub events.
+#
+# Triggers:
+#   - Branch created (push with new ref) → Issue → "In Progress"
+#   - PR merged → Issue → "Done"
+#
+# Setup:
+#   1. Copy this file to <repo>/.github/workflows/jira-sync.yml
+#   2. Replace <PROJECT_KEY> with your Jira project key (e.g. CCNT, PLAT)
+#   3. Create the following GitHub repository secrets:
+#      - JIRA_DOMAIN    (e.g. itunified.atlassian.net)
+#      - JIRA_EMAIL     (service account email)
+#      - JIRA_API_TOKEN (Jira API token for the service account)
+#
+# Extracts Jira issue key from branch name:
+#   <type>/<PROJECT_KEY>-<ID>-<description>  →  <PROJECT_KEY>-<ID>
+#
+# Examples:
+#   feat/<PROJECT_KEY>-13-docker-compose  →  transitions <PROJECT_KEY>-13
+#   fix/<PROJECT_KEY>-99-csv-bug          →  transitions <PROJECT_KEY>-99
+# =============================================================================
+
+name: Jira Issue Sync
+
+on:
+  # Branch created → transition to "In Progress"
+  create:
+
+  # PR merged → transition to "Done"
+  pull_request:
+    types: [closed]
+
+env:
+  JIRA_DOMAIN: ${{ secrets.JIRA_DOMAIN }}
+  JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+  JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+  # TODO: Replace <PROJECT_KEY> below with your Jira project key
+  JIRA_PROJECT_KEY: <PROJECT_KEY>
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1: Branch created → Move issue to "In Progress"
+  # -------------------------------------------------------------------------
+  branch-created:
+    if: github.event_name == 'create' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira issue key from branch name
+        id: extract
+        run: |
+          BRANCH="${{ github.event.ref }}"
+          echo "Branch: $BRANCH"
+
+          # Extract <PROJECT_KEY>-<number> from branch name
+          # TODO: Replace <PROJECT_KEY> with your Jira project key
+          if [[ "$BRANCH" =~ (<PROJECT_KEY>-[0-9]+) ]]; then
+            ISSUE_KEY="${BASH_REMATCH[1]}"
+            echo "issue_key=$ISSUE_KEY" >> "$GITHUB_OUTPUT"
+            echo "::notice::Found Jira issue: $ISSUE_KEY"
+          else
+            echo "::notice::No Jira issue key found in branch '$BRANCH'. Skipping."
+            echo "issue_key=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Transition issue to In Progress
+        if: steps.extract.outputs.issue_key != ''
+        env:
+          ISSUE_KEY: ${{ steps.extract.outputs.issue_key }}
+        run: |
+          set -euo pipefail
+
+          echo "Transitioning $ISSUE_KEY to In Progress..."
+
+          # Get current status to avoid unnecessary transitions
+          CURRENT_STATUS=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}?fields=status" | \
+            jq -r '.fields.status.name')
+
+          echo "Current status: $CURRENT_STATUS"
+
+          if [ "$CURRENT_STATUS" = "In Progress" ]; then
+            echo "::notice::$ISSUE_KEY is already In Progress. Skipping."
+            exit 0
+          fi
+
+          if [ "$CURRENT_STATUS" = "Done" ]; then
+            echo "::notice::$ISSUE_KEY is already Done. Not moving back. Skipping."
+            exit 0
+          fi
+
+          # Get available transitions
+          TRANSITIONS=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}/transitions")
+
+          # Find "In Progress" transition ID
+          TRANSITION_ID=$(echo "$TRANSITIONS" | jq -r \
+            '.transitions[] | select(.name == "In Progress") | .id')
+
+          if [ -z "$TRANSITION_ID" ] || [ "$TRANSITION_ID" = "null" ]; then
+            echo "::warning::No 'In Progress' transition available for $ISSUE_KEY"
+            exit 0
+          fi
+
+          # Execute transition
+          curl -sf -X POST -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}/transitions" \
+            -d "{\"transition\": {\"id\": \"$TRANSITION_ID\"}}"
+
+          echo "::notice::$ISSUE_KEY transitioned to In Progress"
+
+  # -------------------------------------------------------------------------
+  # Job 2: PR merged → Move issue to "Done"
+  # -------------------------------------------------------------------------
+  pr-merged:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract Jira issue key from branch name
+        id: extract
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          echo "Branch: $BRANCH"
+
+          # Extract <PROJECT_KEY>-<number> from branch name
+          # TODO: Replace <PROJECT_KEY> with your Jira project key
+          if [[ "$BRANCH" =~ (<PROJECT_KEY>-[0-9]+) ]]; then
+            ISSUE_KEY="${BASH_REMATCH[1]}"
+            echo "issue_key=$ISSUE_KEY" >> "$GITHUB_OUTPUT"
+            echo "::notice::Found Jira issue: $ISSUE_KEY"
+          else
+            echo "::notice::No Jira issue key found in branch '$BRANCH'. Skipping."
+            echo "issue_key=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Transition issue to Done
+        if: steps.extract.outputs.issue_key != ''
+        env:
+          ISSUE_KEY: ${{ steps.extract.outputs.issue_key }}
+        run: |
+          set -euo pipefail
+
+          echo "Transitioning $ISSUE_KEY to Done..."
+
+          # Get current status
+          CURRENT_STATUS=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}?fields=status" | \
+            jq -r '.fields.status.name')
+
+          echo "Current status: $CURRENT_STATUS"
+
+          if [ "$CURRENT_STATUS" = "Done" ]; then
+            echo "::notice::$ISSUE_KEY is already Done. Skipping."
+            exit 0
+          fi
+
+          # Get available transitions
+          TRANSITIONS=$(curl -sf -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}/transitions")
+
+          # Find "Done" transition ID
+          TRANSITION_ID=$(echo "$TRANSITIONS" | jq -r \
+            '.transitions[] | select(.name == "Done") | .id')
+
+          if [ -z "$TRANSITION_ID" ] || [ "$TRANSITION_ID" = "null" ]; then
+            echo "::warning::No 'Done' transition available for $ISSUE_KEY"
+            exit 0
+          fi
+
+          # Execute transition
+          curl -sf -X POST -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://${JIRA_DOMAIN}/rest/api/3/issue/${ISSUE_KEY}/transitions" \
+            -d "{\"transition\": {\"id\": \"$TRANSITION_ID\"}}"
+
+          echo "::notice::$ISSUE_KEY transitioned to Done"

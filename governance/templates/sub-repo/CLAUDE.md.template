@@ -1,0 +1,13 @@
+# CLAUDE.md
+
+This repo is governed by **The Clawd Family**.
+
+## Mandatory
+
+Read `AGENT.md` in this repo for governance access and repo-specific rules.
+
+## Governance Access
+
+Governance policies are served via RAG API. See `AGENT.md` for connection details.
+
+When RAG is unavailable: **STOP — ASK HUMAN**.

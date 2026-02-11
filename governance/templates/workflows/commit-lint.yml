@@ -1,0 +1,51 @@
+# =============================================================================
+# Conventional Commit Lint (Mandatory Workflow)
+# =============================================================================
+# Enforces conventional commit messages on PRs for consistent changelog
+# generation and release automation.
+#
+# Setup:
+#   1. Copy this file to <repo>/.github/workflows/commit-lint.yml
+#   2. No secrets required for this workflow
+#   3. Optionally add a commitlint.config.js for custom rules
+#
+# Format: <type>(<scope>): <description>
+#   type:  feat | fix | docs | style | refactor | perf | test | build | ci | chore
+#   scope: optional, e.g. <PROJECT_KEY>-94, backend, frontend, db
+#
+# Examples:
+#   feat(<PROJECT_KEY>-11): Setup Docker Compose stack
+#   fix(backend): Resolve CSV parsing edge case
+#   docs: Update API documentation
+# =============================================================================
+
+name: Commit Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install commitlint
+        run: npm install --save-dev @commitlint/{cli,config-conventional}
+
+      - name: Lint PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: echo "$PR_TITLE" | npx commitlint
+
+      - name: Lint commits
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

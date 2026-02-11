@@ -1,0 +1,180 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Provider {
+  CLOUDFLARE
+  HOSTINGER
+}
+
+enum ResourceType {
+  DNS_RECORD
+  TUNNEL
+  ZERO_TRUST
+  WAF_RULE
+  VPS
+  FIREWALL
+  DOMAIN
+}
+
+enum Environment {
+  DEV
+  UAT
+  PROD
+}
+
+enum Lifecycle {
+  PENDING
+  ACTIVE
+  DEPRECATED
+  DECOMMISSIONED
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum GapType {
+  UNDER_PROVISIONED
+  OVER_PROVISIONED
+  DRIFTED
+  STALE
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AgentRole {
+  REQUIREMENTS
+  ARCHITECTURE
+  PLANNING
+  FRONTEND
+  BACKEND
+  QA
+  SECURITY
+  DOCUMENTATION
+  DEVOPS
+  IMPLEMENTATION_AUDIT
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model InfrastructureResource {
+  id            String       @id @default(cuid())
+  subRepo       String       @map("sub_repo")
+  provider      Provider
+  resourceType  ResourceType @map("resource_type")
+  environment   Environment
+  lifecycle     Lifecycle    @default(PENDING)
+  name          String
+  config        Json         // Provider-specific config (DNS record, tunnel, VPS, etc.)
+  ocTask        String?      @map("oc_task")
+  provisionedAt DateTime?    @map("provisioned_at")
+  lastVerified  DateTime?    @map("last_verified")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  @@index([subRepo])
+  @@index([provider])
+  @@index([environment])
+  @@index([lifecycle])
+  @@map("infrastructure_resources")
+}
+
+model AgentSession {
+  id            String        @id @default(cuid())
+  correlationId String        @map("correlation_id")
+  subRepo       String        @map("sub_repo")
+  agentRole     AgentRole     @map("agent_role")
+  jiraIssue     String        @map("jira_issue")
+  status        SessionStatus @default(ACTIVE)
+  startedAt     DateTime      @default(now()) @map("started_at")
+  endedAt       DateTime?     @map("ended_at")
+  model         String?
+  tokenUsage    Json?         @map("token_usage")
+  description   String?       // What the agent is currently working on
+
+  auditEntries  AuditEntry[]
+
+  @@index([subRepo])
+  @@index([status])
+  @@index([agentRole])
+  @@map("agent_sessions")
+}
+
+model AuditEntry {
+  id            String   @id @default(cuid())
+  timestamp     DateTime @default(now())
+  correlationId String   @map("correlation_id")
+  jiraIssue     String   @map("jira_issue")
+  agentRole     AgentRole @map("agent_role")
+  actionType    String   @map("action_type")
+  resource      String
+  result        String   // "success" or "failure:reason"
+  humanApproved Boolean  @default(false) @map("human_approved")
+  model         String?
+  tokenUsage    Json?    @map("token_usage")
+
+  session       AgentSession? @relation(fields: [sessionId], references: [id])
+  sessionId     String?       @map("session_id")
+
+  @@index([correlationId])
+  @@index([jiraIssue])
+  @@index([agentRole])
+  @@index([timestamp])
+  @@map("audit_entries")
+}
+
+model GapDetection {
+  id          String   @id @default(cuid())
+  subRepo     String   @map("sub_repo")
+  gapType     GapType  @map("gap_type")
+  provider    Provider
+  description String
+  severity    Severity
+  ocTask      String?  @map("oc_task")
+  resolved    Boolean  @default(false)
+  detectedAt  DateTime @default(now()) @map("detected_at")
+  resolvedAt  DateTime? @map("resolved_at")
+
+  @@index([subRepo])
+  @@index([gapType])
+  @@index([resolved])
+  @@map("gap_detections")
+}
+
+// ─── Governance RAG ─────────────────────────────────────────────────────────
+
+model GovernanceChunk {
+  id             String   @id @default(cuid())
+  section        String                          // Heading text (e.g., "Agent-Team System")
+  content        String                          // Full section content (markdown)
+  version        String                          // AGENT.md version (e.g., "2.0.0")
+  headingLevel   Int      @map("heading_level")  // 1 = #, 2 = ##, 3 = ###
+  sectionIndex   Int      @map("section_index")  // Order within document
+  rolesAffected  String[] @map("roles_affected") // Which roles this section applies to
+  gateType       String?  @map("gate_type")      // planning, qa, security, documentation, etc.
+  embedding      Unsupported("vector(1024)")?    // Voyager voyage-3 embedding
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([version])
+  @@index([section])
+  @@map("governance_chunks")
+}
