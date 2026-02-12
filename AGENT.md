@@ -1,7 +1,7 @@
 # AGENT.md – Central Governance
 
-**Version:** 2.0.0
-**Last Updated:** 2026-02-11
+**Version:** 0.2.0-beta
+**Last Updated:** 2026-02-12
 **Product:** The Clawd Family
 **Repo:** `itunified-io/the-clawd-family`
 

@@ -4,39 +4,68 @@
 
 | Field | Value |
 |-------|-------|
-| **Version** | 2.0.0 |
-| **Release Date** | 2026-02-11 |
+| **Version** | 0.2.0-beta |
+| **Release Date** | 2026-02-12 |
 | **Product** | The Clawd Family |
 | **Jira Releases** | https://itunified.atlassian.net/projects/JCF/versions |
 
 ## Versioning Strategy
 
+The Clawd Family uses a **beta-to-GA** release track:
+
+- **v0.x.0-beta** — Pre-GA feature releases. Each minor bump adds one epic's worth of functionality.
+- **v1.0.0** — General Availability. Reached after Memory RAG (the last core feature) is complete.
+- **v1.x.0** — Post-GA enhancements and integrations.
+
 | Bump | When |
 |------|------|
-| **MAJOR** | Breaking changes to governance rules or product architecture |
-| **MINOR** | New governance sections, policies, features, or epics (backward compatible) |
-| **PATCH** | Clarifications, typo fixes, minor updates |
+| **MAJOR** | GA milestone (0.x → 1.0.0) or breaking changes post-GA |
+| **MINOR** | New epic / feature set (backward compatible) |
+| **PATCH** | Clarifications, bug fixes, minor updates |
 
 ## Roadmap
 
-| Version | Target Date | Epic(s) | Status |
-|---------|-------------|---------|--------|
-| v2.0.0 | 2026-02-11 | JCF-1 Product Launch | Released |
-| v2.1.0 | 2026-02-28 | Governance RAG | Planned |
-| v2.2.0 | 2026-03-13 | Registry & Tooling | Planned |
-| v2.3.0 | 2026-03-27 | Documentation | Planned |
-| v2.4.0 | 2026-05-11 | JCF-60 Persona Enhancements | Planned |
-| v2.5.0 | 2026-05-25 | JCF-61 API Security, JCF-62 Analytics | Planned |
-| v2.6.0 | 2026-06-08 | JCF-63 Real-Time, JCF-64 Alerts | Planned |
-| v2.7.0 | 2026-06-08 | JCF-65 Memory RAG | Planned |
-| v2.8.0 | 2026-06-22 | JCF-66 Dashboard Features, JCF-67 Integrations | Planned |
-| v2.9.0 | 2026-06-22 | JCF-59 Governance Operations | Planned |
+### Pre-GA (Beta Track)
+
+| Version | Target Date | Epic | Description | Status |
+|---------|-------------|------|-------------|--------|
+| v0.1.0-beta | 2026-02-11 | JCF-1 | Product Launch — monorepo, governance, dashboard, Docker | Released |
+| v0.2.0-beta | 2026-02-12 | JCF-146 | Governance RAG — embeddings, vector search, dashboard | Released |
+| v0.3.0-beta | 2026-03-14 | JCF-59 | Governance Operations | Planned |
+| v0.4.0-beta | 2026-03-28 | JCF-60 | Agent Persona Enhancements | Planned |
+| v0.5.0-beta | 2026-04-11 | JCF-61 | API Security & Authentication | Planned |
+| v0.6.0-beta | 2026-04-25 | JCF-62 | Dashboard Analytics & Reporting | Planned |
+| v0.7.0-beta | 2026-05-09 | JCF-63 | Real-Time Agent Activity Updates | Planned |
+| v0.8.0-beta | 2026-05-23 | JCF-64 | Alert & Notification System | Planned |
+| v0.9.0-beta | 2026-06-06 | JCF-65 | Memory RAG API — pgvector + hybrid embeddings | Planned |
+
+### GA and Post-GA
+
+| Version | Target Date | Epic | Description | Status |
+|---------|-------------|------|-------------|--------|
+| v1.0.0 | 2026-06-20 | — | General Availability — production-ready agent platform | Planned |
+| v1.1.0 | 2026-07-04 | JCF-66 | Dashboard Features — leaderboard + org chart | Planned |
+| v1.2.0 | 2026-07-18 | JCF-67 | External Integrations — Slack + GitHub Bots | Planned |
 
 ## Release History
 
-### v2.0.0 — Product Launch (2026-02-11)
+### v0.2.0-beta — Governance RAG Completion (2026-02-12)
 
-**Jira:** JCF-1 | **Stories:** JCF-2 through JCF-14 (all Done)
+**Jira:** JCF-146 | **Stories:** JCF-6 through JCF-9, JCF-147 through JCF-157
+
+- Multi-provider embedding abstraction (Ollama, Voyage AI, OpenAI)
+- Prisma migration for governance_chunks table with pgvector HNSW index
+- Enhanced ingest pipeline with embedding generation and ### sub-chunking
+- pgvector cosine similarity search with keyword fallback
+- Dedicated /api/governance/version and /api/governance/sections endpoints
+- Functional GitHub Action with error handling and verification
+- Dashboard governance page with sections browser and search tester
+- Sidebar rebrand: "Jean-Clawd" → "The Clawd Family"
+- Updated sub-repo AGENT.md template with RAG API connection details
+
+### v0.1.0-beta — Product Launch (2026-02-11)
+
+**Jira:** JCF-1 | **Stories:** JCF-2 through JCF-14
 
 - Merged governance (agent repo) + dashboard (jean-clawd repo) into single product
 - Monorepo structure: `governance/` + `dashboard/`
@@ -78,3 +107,11 @@ All open issues from legacy projects (OC, JC) were migrated to JCF on 2026-02-12
 - **OC → JCF:** 12 stories + 26 subtasks (governance, persona enhancements)
 - **JC → JCF:** 24 stories + 16 subtasks (API, dashboard, integrations)
 - Source issues retain migration comments; statuses left as-is for historical reference
+
+### Version Renaming (2026-02-12)
+
+The original v2.x.0 versioning was inherited from the legacy agent repo (v1.28.0 → v2.0.0). Since The Clawd Family is a new product that hasn't reached production maturity, all versions were renamed to a proper beta track:
+
+- v2.0.0 → v0.1.0-beta, v2.1.0 → v0.2.0-beta, ..., v2.8.0 → v0.9.0-beta
+- v1.0.0 = GA milestone (after Memory RAG)
+- v2.9.0 → v1.1.0, v2.10.0 → v1.2.0 (post-GA)
