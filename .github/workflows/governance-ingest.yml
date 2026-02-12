@@ -7,9 +7,11 @@
 #
 # Triggers:
 #   - Push to main that modifies AGENT.md
+#   - Manual workflow_dispatch
 #
 # Requires:
-#   - Dashboard app running at APP_URL (default: http://localhost:3000)
+#   - Dashboard app running at APP_URL (repository variable)
+#   - Optional: DASHBOARD_API_KEY (repository secret) for authenticated ingest
 # =============================================================================
 
 name: Governance Ingest
@@ -19,6 +21,13 @@ on:
     branches: [main]
     paths:
       - "AGENT.md"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Force re-ingest even if version unchanged"
+        required: false
+        default: "false"
+        type: boolean
 
 env:
   APP_URL: ${{ vars.APP_URL || 'http://localhost:3000' }}
@@ -34,17 +43,69 @@ jobs:
         id: version
         run: |
           VERSION=$(grep -m1 '^\*\*Version:\*\*' AGENT.md | sed 's/.*\*\* //')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not extract version from AGENT.md"
+            exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "::notice::Governance version: $VERSION"
 
       - name: Ingest AGENT.md into RAG
+        id: ingest
         run: |
           CONTENT=$(cat AGENT.md | jq -Rs .)
 
-          RESPONSE=$(curl -sf -X POST \
+          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.DASHBOARD_API_KEY }}" \
             "${APP_URL}/api/governance" \
             -d "{\"content\": $CONTENT, \"version\": \"${{ steps.version.outputs.version }}\"}")
 
-          echo "$RESPONSE" | jq .
+          echo "HTTP status: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Ingest failed with HTTP $HTTP_CODE"
+            cat response.json
+            exit 1
+          fi
+
+          cat response.json | jq .
           echo "::notice::Governance ingested successfully"
+
+          # Extract counts for summary
+          CHUNK_COUNT=$(jq -r '.count // 0' response.json)
+          EMBEDDING_COUNT=$(jq -r '.embeddingsGenerated // 0' response.json)
+          echo "chunk_count=$CHUNK_COUNT" >> "$GITHUB_OUTPUT"
+          echo "embedding_count=$EMBEDDING_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Verify ingest via version endpoint
+        run: |
+          HTTP_CODE=$(curl -s -o version.json -w "%{http_code}" \
+            "${APP_URL}/api/governance/version")
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::warning::Version verification returned HTTP $HTTP_CODE"
+            exit 0
+          fi
+
+          STORED_VERSION=$(jq -r '.version' version.json)
+          EXPECTED_VERSION="${{ steps.version.outputs.version }}"
+
+          if [ "$STORED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::warning::Version mismatch: stored=$STORED_VERSION expected=$EXPECTED_VERSION"
+          else
+            echo "::notice::Verified: governance v$STORED_VERSION is active"
+          fi
+
+          cat version.json | jq .
+
+      - name: Job summary
+        run: |
+          echo "## Governance Ingest Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Chunks | ${{ steps.ingest.outputs.chunk_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Embeddings | ${{ steps.ingest.outputs.embedding_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | ${{ env.APP_URL }} |" >> $GITHUB_STEP_SUMMARY

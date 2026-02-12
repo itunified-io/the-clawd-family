@@ -8,11 +8,37 @@
 
 ---
 
+## Governance Source
+
+This repository is governed by The Clawd Family central governance.
+
+**RAG API (preferred):**
+```
+POST {{DASHBOARD_URL}}/api/governance/search
+Content-Type: application/json
+
+{ "query": "<your question>", "role": "<YOUR_ROLE>", "limit": 5 }
+```
+
+**Version check:**
+```
+GET {{DASHBOARD_URL}}/api/governance/version
+```
+
+**Fallback:** [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md)
+
+### Session Start
+
+At the beginning of every agent session, query the governance API:
+1. `GET /api/governance/version` — check governance version
+2. `POST /api/governance/search` — query for role-specific policies with `{ "query": "session start checklist", "role": "<YOUR_ROLE>" }`
+3. If the API is unreachable, fall back to the raw AGENT.md link above
+
+---
+
 ## Scope
 
 This repository contains {{REPO_DESCRIPTION}}.
-
-Governed by: [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md)
 
 ---
 
@@ -44,4 +70,4 @@ Governed by: [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-cla
 
 ---
 
-Refer to [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md) for all other governance rules.
+Refer to the governance RAG API above, or [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md) for all other governance rules.
