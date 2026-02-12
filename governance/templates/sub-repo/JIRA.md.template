@@ -1,0 +1,32 @@
+# Jira Integration
+
+## Project
+
+| Field | Value |
+|-------|-------|
+| **Project Key** | {{JIRA_PROJECT_KEY}} |
+| **Project Name** | {{PROJECT_NAME}} |
+| **Project URL** | https://itunified.atlassian.net/browse/{{JIRA_PROJECT_KEY}} |
+| **Board** | https://itunified.atlassian.net/jira/software/c/projects/{{JIRA_PROJECT_KEY}}/boards/{{BOARD_ID}} |
+
+## Confluence
+
+| Field | Value |
+|-------|-------|
+| **Space Key** | {{CONFLUENCE_SPACE_KEY}} |
+| **Space URL** | https://itunified.atlassian.net/wiki/spaces/{{CONFLUENCE_SPACE_KEY}}/overview |
+
+## Governance
+
+| Field | Value |
+|-------|-------|
+| **Governed by** | [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md) |
+| **Parent Jira** | [JCF](https://itunified.atlassian.net/browse/JCF) |
+
+## GitHub Integration
+
+| Field | Value |
+|-------|-------|
+| **Repository** | itunified-io/{{REPO_NAME}} |
+| **Branch Pattern** | `<type>/{{JIRA_PROJECT_KEY}}-<ID>-description` |
+| **Commit Pattern** | `type({{JIRA_PROJECT_KEY}}-<ID>): description` |

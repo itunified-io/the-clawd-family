@@ -13,7 +13,11 @@ The Clawd Family is a product that combines:
 
 ```
 the-clawd-family/
-├── governance/        ← Master governance (AGENT.md, JIRA.md, RELEASE.md, templates)
+├── AGENT.md           ← Master governance document
+├── JIRA.md            ← Jira project, board, sprints, versions
+├── RELEASE.md         ← Version history and roadmap
+├── PROJECT.md         ← Product overview
+├── governance/        ← Templates and API known issues
 ├── dashboard/         ← Next.js 16 monitoring dashboard + APIs
 ├── docker-compose.yml ← PostgreSQL 16 + pgvector + Dashboard
 ```

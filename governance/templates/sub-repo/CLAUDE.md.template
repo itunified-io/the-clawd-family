@@ -4,10 +4,6 @@ This repo is governed by **The Clawd Family**.
 
 ## Mandatory
 
-Read `AGENT.md` in this repo for governance access and repo-specific rules.
+Read and follow `AGENT.md` in this repo for repo-specific rules.
 
-## Governance Access
-
-Governance policies are served via RAG API. See `AGENT.md` for connection details.
-
-When RAG is unavailable: **STOP — ASK HUMAN**.
+Master governance: [the-clawd-family/AGENT.md](https://github.com/itunified-io/the-clawd-family/blob/main/AGENT.md)

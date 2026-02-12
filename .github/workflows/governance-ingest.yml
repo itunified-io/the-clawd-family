@@ -1,12 +1,12 @@
 # =============================================================================
 # Governance Auto-Ingest
 # =============================================================================
-# Automatically re-ingests governance/AGENT.md into the RAG database
+# Automatically re-ingests AGENT.md into the RAG database
 # when it changes. This ensures sub-repos always get the latest governance
 # policies via the /api/governance/search endpoint.
 #
 # Triggers:
-#   - Push to main that modifies governance/AGENT.md
+#   - Push to main that modifies AGENT.md
 #
 # Requires:
 #   - Dashboard app running at APP_URL (default: http://localhost:3000)
@@ -18,7 +18,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "governance/AGENT.md"
+      - "AGENT.md"
 
 env:
   APP_URL: ${{ vars.APP_URL || 'http://localhost:3000' }}
@@ -33,13 +33,13 @@ jobs:
       - name: Extract version from AGENT.md
         id: version
         run: |
-          VERSION=$(grep -m1 '^\*\*Version:\*\*' governance/AGENT.md | sed 's/.*\*\* //')
+          VERSION=$(grep -m1 '^\*\*Version:\*\*' AGENT.md | sed 's/.*\*\* //')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "::notice::Governance version: $VERSION"
 
       - name: Ingest AGENT.md into RAG
         run: |
-          CONTENT=$(cat governance/AGENT.md | jq -Rs .)
+          CONTENT=$(cat AGENT.md | jq -Rs .)
 
           RESPONSE=$(curl -sf -X POST \
             -H "Content-Type: application/json" \
